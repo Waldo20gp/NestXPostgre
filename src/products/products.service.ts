@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException, Logger, 
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Product, ProductImage } from './entities';
 import { isUUID } from 'class-validator';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
@@ -17,7 +17,9 @@ export class ProductsService {
     private readonly productRepository: Repository<Product>,
 
     @InjectRepository(ProductImage)
-    private readonly productImageRepository: Repository<ProductImage>
+    private readonly productImageRepository: Repository<ProductImage>,
+
+    private readonly dataSource: DataSource 
   ){}
 
 
@@ -93,18 +95,37 @@ export class ProductsService {
 
 
   async update(id: string, updateProductDto: UpdateProductDto) {
-    const product = await this.productRepository.preload({
-      id: id,
-      ...updateProductDto,
-      images: [],
-    })
+    
+    const { images, ...toUpdate } = updateProductDto
+    
+    
+    
+    const product = await this.productRepository.preload({id,...toUpdate})
 
     if (!product) throw new NotFoundException(`Product with id: ${ id } not found`);
 
+    //Create query runner
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+
     try {
-      await this.productRepository.save( product );
-      return product
+      if ( images ){ 
+        await queryRunner.manager.delete( ProductImage, { product: { id } } )
+        product.images = images.map( 
+          (image) => this.productImageRepository.create({ url:image })
+          )
+      } 
+      await queryRunner.manager.save( product );
+
+      await queryRunner.commitTransaction();
+      await queryRunner.release();
+      // await this.productRepository.save( product );
+      return this.findOnePlain(id);
     } catch (error) {
+      await queryRunner.rollbackTransaction();
+      await queryRunner.release();
       this.handleDBExceptions(error)
     }
   }
@@ -121,4 +142,19 @@ export class ProductsService {
       this.logger.error(error)
       throw new InternalServerErrorException('Error en el servidor inesperado, llama al equipo de backend')
   }
+
+  async deleteAllProducts(){
+    const query = this.productRepository.createQueryBuilder('product');
+
+    try{
+      return await query
+      .delete().
+      where({}).
+      execute();
+    }catch (error){
+      this.handleDBExceptions(error);
+
+    }
+  }
+
 }
