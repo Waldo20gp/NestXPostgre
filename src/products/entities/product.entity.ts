@@ -1,4 +1,4 @@
-import { text } from "stream/consumers";
+
 import { BeforeInsert, BeforeUpdate, Column, Entity, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 import { ProductImage } from "./product-image.entity";
 
